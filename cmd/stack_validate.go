@@ -14,9 +14,14 @@
 package cmd
 
 import (
+	crypto_rand "crypto/rand"
+	"encoding/binary"
 	"fmt"
+	"math/rand"
+	math_rand "math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,10 +75,11 @@ Run this command from the root directory of your Appsody project.`,
 			rootConfig.Info.Log("stackPath is: ", stackPath)
 
 			// check for templates dir, error out if its not there
-			check, err := Exists("templates")
+			check, err := Exists(filepath.Join(stackPath, "templates"))
 			if err != nil {
 				return errors.New("Error checking stack root directory: " + err.Error())
 			}
+
 			if !check {
 				// if we can't find the templates directory then we are not starting from a valid root of the stack directory
 				return errors.New("Unable to reach templates directory. Current directory must be the root of the stack")
@@ -96,8 +102,9 @@ Run this command from the root directory of your Appsody project.`,
 
 			// lint
 			if !noLint {
-				_, err = RunAppsodyCmdExec([]string{"stack", "lint"}, stackPath, rootConfig)
-				if err != nil {
+				output, err := RunAppsodyCmdExec([]string{"stack", "lin"}, stackPath, rootConfig)
+
+				if err != nil || strings.Contains(output, "[ERROR]") {
 					//logs error but keeps going
 					rootConfig.Error.Log(err)
 					testResults = append(testResults, ("FAILED: Lint for stack:" + stackName))
@@ -144,8 +151,15 @@ Run this command from the root directory of your Appsody project.`,
 					continue
 				}
 
+				var b [8]byte
+				_, err := crypto_rand.Read(b[:])
+				if err != nil {
+					panic("cannot seed math/rand package with cryptographically secure random number generator")
+				}
+				math_rand.Seed(int64(binary.LittleEndian.Uint64(b[:])))
+
 				// create temp project directory in the .appsody directory
-				projectDir := filepath.Join(getHome(rootConfig), "stacks", "validating-"+stackName)
+				projectDir := filepath.Join(getHome(rootConfig), "stacks", "validating-"+stackName+strconv.Itoa(randomInt(10000, 99999)))
 				rootConfig.Debug.Log("projectDir is: ", projectDir)
 
 				projectDirExists, err := Exists(projectDir)
@@ -266,6 +280,7 @@ func TestInit(log *LoggingConfig, stack string, template string, projectDir stri
 func TestRun(log *LoggingConfig, stack string, template string, projectDir string, rootConfig *RootCommandConfig) error {
 
 	runChannel := make(chan error)
+	log.Error.log(projectDir)
 	containerName := "testRunContainer"
 	go func() {
 		log.Info.Log("**************************************************************************")
@@ -320,7 +335,7 @@ func TestRun(log *LoggingConfig, stack string, template string, projectDir strin
 	log.Info.Log("Appsody run did not fail")
 
 	// stop and clean up after the run
-	_, err := RunAppsodyCmdExec([]string{"stop", "--name", "testRunContainer"}, projectDir, rootConfig)
+	_, err := RunAppsodyCmdExec([]string{"stop", "--name", containerName}, projectDir, rootConfig)
 	if err != nil {
 		log.Error.Log("appsody stop failed")
 	}
@@ -367,7 +382,7 @@ func TestBuild(log *LoggingConfig, stack string, template string, projectDir str
 	}
 
 	if !imageBuilt {
-		log.Error.Log("image was never built")
+		log.Error.Log(imageName, " was never built")
 		return err
 	}
 
@@ -379,4 +394,9 @@ func TestBuild(log *LoggingConfig, stack string, template string, projectDir str
 	}
 
 	return nil
+}
+
+// Returns an int >= min, < max
+func randomInt(min, max int) int {
+	return min + rand.Intn(max-min)
 }

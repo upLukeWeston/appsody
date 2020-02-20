@@ -17,11 +17,13 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
 )
 
 // RunAppsodyCmdExec runs the appsody CLI with the given args in a new process
@@ -30,6 +32,8 @@ import (
 // workingDir will be the directory the command runs in
 func RunAppsodyCmdExec(args []string, workingDir string, rootConfig *RootCommandConfig) (string, error) {
 	execDir, err := os.Getwd()
+	rootConfig.LoggingConfig.Debug.log("EXEC DIR IS: ", execDir)
+
 	if err != nil {
 		return "", err
 	}
@@ -42,19 +46,21 @@ func RunAppsodyCmdExec(args []string, workingDir string, rootConfig *RootCommand
 	}()
 
 	// set the working directory
+	rootConfig.LoggingConfig.Debug.log("WORKING DIR IS: ", workingDir)
 	if err := os.Chdir(workingDir); err != nil {
 		return "", err
 	}
 
-	executable, _ := os.Executable()
+	//executable, _ := os.Executable()
 
-	cmdArgs := []string{executable}
+	cmdArgs := []string{"appsody"}
 	if rootConfig.Verbose {
 		cmdArgs = append(cmdArgs, "-v")
 	}
 	cmdArgs = append(cmdArgs, args...)
-	fmt.Println(cmdArgs)
+	rootConfig.LoggingConfig.Debug.log("ARGS ARE: ", cmdArgs)
 
+	rootConfig.LoggingConfig.Debug.logf("@@@@@@@@ About to run %s", cmdArgs)
 	execCmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
 	outReader, outWriter, err := os.Pipe()
 	if err != nil {
@@ -89,6 +95,73 @@ func RunAppsodyCmdExec(args []string, workingDir string, rootConfig *RootCommand
 		log.Fatal(err)
 	}
 	err = execCmd.Wait()
+
+	return outBuffer.String(), err
+}
+
+func RunAppsodyCmd(args []string, workingDir string, rootConfig *RootCommandConfig) (string, error) {
+
+	execDir, err := os.Getwd()
+	rootConfig.LoggingConfig.Debug.log("EXEC DIR IS: ", execDir)
+
+	if err != nil {
+		return "", err
+	}
+
+	defer func() {
+		// replace the original working directory when this function completes
+		err := os.Chdir(execDir)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	// set the working directory
+	rootConfig.LoggingConfig.Debug.log("WORKING DIR IS: ", workingDir)
+	if err := os.Chdir(workingDir); err != nil {
+		return "", err
+	}
+
+	if rootConfig.Verbose {
+		args = append(args, "-v")
+	}
+
+	// // Buffer cmd output, to be logged if there is a failure
+	var outBuffer bytes.Buffer
+	// Direct cmd console output to a buffer
+	outReader, outWriter := io.Pipe()
+
+	// copy the output to the buffer, and also to the test log
+	outScanner := bufio.NewScanner(outReader)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		for outScanner.Scan() {
+			out := outScanner.Bytes()
+			outBuffer.Write(out)
+			outBuffer.WriteByte('\n')
+			rootConfig.LoggingConfig.Debug.log(string(out))
+		}
+		wg.Done()
+	}()
+
+	rootConfig.Debug.log("RUNNING APPSODY WITH ARGS: ", args)
+	err = ExecuteE("vlatest", "latest", workingDir, outWriter, outWriter, args)
+	if err != nil {
+		return "", err
+	}
+
+	// close the writer first, so it sends an EOF to the scanner above,
+	// then wait for the scanner to finish before closing the reader
+	outWriter.Close()
+	wg.Wait()
+	outReader.Close()
+
+	// replace the original working directory when this function completes
+	err = os.Chdir(execDir)
+	if err != nil {
+		return "", err
+	}
 
 	return outBuffer.String(), err
 }

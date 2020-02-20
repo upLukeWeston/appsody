@@ -359,6 +359,7 @@ func getProjectDir(config *RootCommandConfig) (string, error) {
 		return config.ProjectDir, err
 	}
 	if !projectDir {
+		config.Error.log("APPSODY CONFIG = ", appsodyConfig)
 		var e NotAnAppsodyProject = "The current directory is not a valid appsody project. Run `appsody init <stack>` to create one. Run `appsody list` to see the available stacks."
 		return config.ProjectDir, &e
 	}

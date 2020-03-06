@@ -366,7 +366,15 @@ func getProjectDir(config *RootCommandConfig) (string, error) {
 	return config.ProjectDir, nil
 }
 
-// IsValidProjectName tests the given string against Appsody name rules.
+func IsValidProjectName(name string) (bool, error) {
+	return isValidParamName(name, "project-name")
+}
+
+func IsValidApplicationName(name string) (bool, error) {
+	return isValidParamName(name, "application-name")
+}
+
+// IsValidParamName tests the given string against Appsody name rules.
 // This common set of name rules for Appsody must comply to Kubernetes
 // resource name, Kubernetes label value, and Docker container name rules.
 // The current rules are:
@@ -374,12 +382,12 @@ func getProjectDir(config *RootCommandConfig) (string, error) {
 // 2. Must contain only lowercase letters, digits, and dashes
 // 3. Must end with a letter or digit
 // 4. Must be 68 characters or less
-func IsValidProjectName(name string) (bool, error) {
+func isValidParamName(name, param string) (bool, error) {
 	if name == "" {
-		return false, errors.New("Invalid project-name. The name cannot be an empty string")
+		return false, errors.Errorf("Invalid %s. The name cannot be an empty string", param)
 	}
 	if len(name) > 68 {
-		return false, errors.Errorf("Invalid project-name \"%s\". The name must be 68 characters or less", name)
+		return false, errors.Errorf("Invalid %s \"%s\". The name must be 68 characters or less", param, name)
 	}
 
 	match, err := regexp.MatchString("^[a-z]([a-z0-9-]*[a-z0-9])?$", name)
@@ -390,7 +398,7 @@ func IsValidProjectName(name string) (bool, error) {
 	if match {
 		return true, nil
 	}
-	return false, errors.Errorf("Invalid project-name \"%s\". The name must start with a lowercase letter, contain only lowercase letters, numbers, or dashes, and cannot end in a dash.", name)
+	return false, errors.Errorf("Invalid %s \"%s\". The name must start with a lowercase letter, contain only lowercase letters, numbers, or dashes, and cannot end in a dash.", param, name)
 }
 
 func IsValidKubernetesLabelValue(value string) (bool, error) {
@@ -518,6 +526,30 @@ func saveProjectNameToConfig(projectName string, config *RootCommandConfig) erro
 	config.Info.log("Your Appsody project name has been set to ", projectName)
 	return nil
 }
+
+func saveApplicationNameToConfig(applicationName string, config *RootCommandConfig) error {
+	valid, err := IsValidProjectName(applicationName)
+	if !valid {
+		return err
+	}
+
+	appsodyConfig := filepath.Join(config.ProjectDir, ConfigFile)
+	v := viper.New()
+	v.SetConfigFile(appsodyConfig)
+	err = v.ReadInConfig()
+	if err != nil {
+		return err
+	}
+	v.Set("application-name", applicationName)
+	err = v.WriteConfig()
+	if err != nil {
+		return err
+	}
+
+	config.Info.log("Your Appsody application name has been set to ", applicationName)
+	return nil
+}
+
 func setStackRegistry(stackRegistry string, config *RootCommandConfig) error {
 
 	// Read in the config
@@ -1490,7 +1522,7 @@ func DockerRunBashCmd(options []string, image string, bashCmd string, config *Ro
 	}
 
 	cmdArgs = append(cmdArgs, "--entrypoint", "/bin/bash", image, "-c", bashCmd)
-	config.Info.log("Running command: ", cmdName, " ", strings.Join(cmdArgs, " "))
+	config.Info.log("Running command: ", cmdName, " ", ArgsToString(cmdArgs))
 	dockerCmd := exec.Command(cmdName, cmdArgs...)
 
 	kout, kerr := SeparateOutput(dockerCmd)
@@ -1511,10 +1543,10 @@ func KubeGet(log *LoggingConfig, args []string, namespace string, dryrun bool) (
 	}
 
 	if dryrun {
-		log.Info.log("Dry run - skipping execution of: ", kcmd, " ", strings.Join(kargs, " "))
+		log.Info.log("Dry run - skipping execution of: ", kcmd, " ", ArgsToString(kargs))
 		return "", nil
 	}
-	log.Info.log("Running command: ", kcmd, " ", strings.Join(kargs, " "))
+	log.Info.log("Running command: ", kcmd, " ", ArgsToString(kargs))
 	execCmd := exec.Command(kcmd, kargs...)
 	kout, kerr := SeparateOutput(execCmd)
 	if kerr != nil {
@@ -1533,10 +1565,10 @@ func KubeApply(log *LoggingConfig, fileToApply string, namespace string, dryrun 
 	}
 
 	if dryrun {
-		log.Info.log("Dry run - skipping execution of: ", kcmd, " ", strings.Join(kargs, " "))
+		log.Info.log("Dry run - skipping execution of: ", kcmd, " ", ArgsToString(kargs))
 		return nil
 	}
-	log.Info.log("Running command: ", kcmd, " ", strings.Join(kargs, " "))
+	log.Info.log("Running command: ", kcmd, " ", ArgsToString(kargs))
 	execCmd := exec.Command(kcmd, kargs...)
 	kout, kerr := SeparateOutput(execCmd)
 	if kerr != nil {
@@ -1556,10 +1588,10 @@ func KubeDelete(log *LoggingConfig, fileToApply string, namespace string, dryrun
 	}
 
 	if dryrun {
-		log.Info.log("Dry run - skipping execution of: ", kcmd, " ", strings.Join(kargs, " "))
+		log.Info.log("Dry run - skipping execution of: ", kcmd, " ", ArgsToString(kargs))
 		return nil
 	}
-	log.Info.log("Running command: ", kcmd, " ", strings.Join(kargs, " "))
+	log.Info.log("Running command: ", kcmd, " ", ArgsToString(kargs))
 	execCmd := exec.Command(kcmd, kargs...)
 
 	kout, kerr := SeparateOutput(execCmd)
@@ -1604,10 +1636,10 @@ func KubeGetKnativeURL(log *LoggingConfig, service string, namespace string, dry
 	}
 
 	if dryrun {
-		log.Info.log("Dry run - skipping execution of: ", kcmd, " ", strings.Join(kargs, " "))
+		log.Info.log("Dry run - skipping execution of: ", kcmd, " ", ArgsToString(kargs))
 		return "", nil
 	}
-	log.Info.log("Running command: ", kcmd, " ", strings.Join(kargs, " "))
+	log.Info.log("Running command: ", kcmd, " ", ArgsToString(kargs))
 	execCmd := exec.Command(kcmd, kargs...)
 	kout, kerr := SeparateOutput(execCmd)
 	if kerr != nil {
@@ -1656,9 +1688,14 @@ func pullCmd(log *LoggingConfig, imageToPull string, buildah bool, dryrun bool) 
 	return nil
 }
 
-func checkDockerImageExistsLocally(log *LoggingConfig, imageToPull string) bool {
-	cmdName := "docker"
+func checkImageExistsLocally(log *LoggingConfig, imageToPull string, buildah bool) bool {
 
+	var cmdName string
+	if buildah {
+		cmdName = "buildah"
+	} else {
+		cmdName = "docker"
+	}
 	imageNameComponents := strings.Split(imageToPull, "/")
 	if len(imageNameComponents) == 3 {
 		if imageNameComponents[0] == "index.docker.io" || imageNameComponents[0] == "docker.io" {
@@ -1713,14 +1750,14 @@ func pullImage(imageToPull string, config *RootCommandConfig) error {
 		pullPolicyAlways = false
 	}
 	if !pullPolicyAlways {
-		localImageFound = checkDockerImageExistsLocally(config.LoggingConfig, imageToPull)
+		localImageFound = checkImageExistsLocally(config.LoggingConfig, imageToPull, config.Buildah)
 	}
 
 	if pullPolicyAlways || (!pullPolicyAlways && !localImageFound) {
 		err := pullCmd(config.LoggingConfig, imageToPull, config.Buildah, config.Dryrun)
 		if err != nil {
 			if pullPolicyAlways {
-				localImageFound = checkDockerImageExistsLocally(config.LoggingConfig, imageToPull)
+				localImageFound = checkImageExistsLocally(config.LoggingConfig, imageToPull, config.Buildah)
 			}
 			if !localImageFound {
 				return errors.Errorf("Could not find the image either in docker hub or locally: %s", imageToPull)
@@ -1809,9 +1846,9 @@ func execAndListenWithWorkDirReturnErr(log *LoggingConfig, command string, args 
 	var execCmd *exec.Cmd
 	var err error
 	if dryrun {
-		log.Info.log("Dry Run - Skipping command: ", command, " ", strings.Join(args, " "))
+		log.Info.log("Dry Run - Skipping command: ", command, " ", ArgsToString(args))
 	} else {
-		log.Info.log("Running command: ", command, " ", strings.Join(args, " "))
+		log.Info.log("Running command: ", command, " ", ArgsToString(args))
 		execCmd = exec.Command(command, args...)
 		if workdir != "" {
 			execCmd.Dir = workdir
@@ -2309,6 +2346,24 @@ func untar(log *LoggingConfig, dst string, r io.Reader, dryrun bool) error {
 	}
 }
 
+// Converts an array of command arguments to a string of arguments
+// properly escaped and quoted for copying and running in sh, bash, or zsh
+func ArgsToString(args []string) string {
+	charsToQuote := ` =*(|<[{?^@#$"'`
+	returnStr := ""
+	for i := 0; i < len(args); i++ {
+		if strings.ContainsAny(args[i], charsToQuote) {
+			returnStr += `"` + strings.Replace(args[i], `"`, `\"`, -1) + `"`
+		} else {
+			returnStr += args[i]
+		}
+		if i+1 != len(args) {
+			returnStr += " "
+		}
+	}
+	return returnStr
+}
+
 func dockerStop(rootConfig *RootCommandConfig, imageName string, dryrun bool) error {
 	cmdName := "docker"
 	cmdArgs := []string{"stop", imageName}
@@ -2346,5 +2401,42 @@ func RemoveIfExists(path string) error {
 			return errors.Errorf("Error removing: %v and children: %v", path, err)
 		}
 	}
+	return nil
+}
+
+func generateCodewindJSON(log *LoggingConfig, indexYaml IndexYaml, indexFilePath string, repoName string) error {
+	indexJSONStack := make([]IndexJSONStack, 0)
+	prefixName := strings.Title(repoName)
+	for _, stack := range indexYaml.Stacks {
+		for _, template := range stack.Templates {
+			stackJSON := IndexJSONStack{}
+			stackJSON.DisplayName = prefixName + " " + stack.Name + " " + template.ID + " template"
+			stackJSON.Description = stack.Description
+			stackJSON.Language = stack.Language
+			stackJSON.ProjectType = "appsodyExtension"
+			stackJSON.ProjectStyle = "Appsody"
+			stackJSON.Location = template.URL
+
+			link := Links{}
+			link.Self = "/devfiles/" + stack.ID + "/devfile.yaml"
+			stackJSON.Links = link
+
+			indexJSONStack = append(indexJSONStack, stackJSON)
+		}
+	}
+
+	// Last thing to do is write the data to the file
+	data, err := json.MarshalIndent(&indexJSONStack, "", "	")
+	if err != nil {
+		return err
+	}
+	indexFilePath = strings.Replace(indexFilePath, ".yaml", ".json", 1)
+
+	err = ioutil.WriteFile(indexFilePath, data, 0666)
+	if err != nil {
+		return errors.Errorf("Error writing to json file: %v", err)
+	}
+
+	log.Info.logf("Succesfully generated file: %s", indexFilePath)
 	return nil
 }
